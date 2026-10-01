@@ -787,6 +787,105 @@ label.field > span {
   font-size: 0.95rem;
 }
 
+.history-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.history-item {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.history-item.open {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow);
+}
+
+.history-item-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  min-height: 52px;
+}
+
+.history-item-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.history-item-main strong {
+  display: block;
+  font-size: 1.02rem;
+}
+
+.history-item-main .meta {
+  display: block;
+  color: var(--muted);
+  font-size: 0.86rem;
+  margin-top: 0.15rem;
+}
+
+.history-item-pay {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.history-item-body {
+  padding: 0 1rem 1rem;
+  border-top: 1px solid var(--line);
+  animation: rise 0.35s ease both;
+}
+
+.history-subhead {
+  margin: 0.85rem 0 0.4rem;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+}
+
+.history-plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.history-plain-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  border-bottom: 1px dashed var(--line);
+  font-size: 0.95rem;
+}
+
+.history-plain-list li:last-child {
+  border-bottom: none;
+}
+
+.history-plain-list .meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.history-plain-list strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 @keyframes rise {
   from {
     opacity: 0;
