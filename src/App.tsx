@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2, RotateCcw, Wallet, Banknote } from 'lucide-react'
+import { Plus, Trash2, RotateCcw, Wallet, Banknote, Archive, ChevronDown, ChevronRight, History } from 'lucide-react'
 import type {
+  ArchivedPaycheck,
   BudgetState,
   CashTxType,
   MutableCategory,
@@ -11,11 +12,13 @@ import type {
 } from './types'
 import {
   applyCashTransaction,
+  archivePaycheckPeriod,
   availableStatYears,
   computeBudget,
   computeYearStats,
   createDefaultState,
   createId,
+  defaultPeriodLabel,
   formatMoney,
   goalProgress,
   goalSaved,
@@ -24,7 +27,7 @@ import {
   saveState,
 } from './math'
 
-type MainTab = PaycheckKey | 'cash' | 'goals' | 'stats'
+type MainTab = PaycheckKey | 'cash' | 'goals' | 'history' | 'stats'
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
@@ -41,11 +44,13 @@ function BudgetView({
   budget,
   onChange,
   onResetAll,
+  onArchive,
 }: {
   paycheckKey: PaycheckKey
   budget: PaycheckBudget
   onChange: (next: PaycheckBudget) => void
   onResetAll: () => void
+  onArchive: (periodLabel: string) => void
 }) {
   const math = useMemo(() => computeBudget(budget), [budget])
   const [logDate, setLogDate] = useState(todayISO)
@@ -504,6 +509,267 @@ function BudgetView({
           )}
         </div>
       </section>
+
+      <section className="card">
+        <div className="card-head">
+          <div>
+            <h2>Finish this paycheck</h2>
+            <p>
+              Save a full snapshot to History (pay, bills, splits, and spending). Your setup
+              stays; the spending log clears for the next period.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              const suggested = defaultPeriodLabel(paycheckKey)
+              const label = window.prompt(
+                'Name this period for History (you can change it):',
+                suggested,
+              )
+              if (label === null) return
+              if (
+                !confirm(
+                  `Archive “${label.trim() || suggested}” and clear the spending log for a fresh ${title}?`,
+                )
+              ) {
+                return
+              }
+              onArchive(label.trim() || suggested)
+            }}
+          >
+            <Archive size={16} /> Archive & start new
+          </button>
+        </div>
+        <p className="hint">
+          Tip: do this when the next deposit hits. Past periods stay in the History tab;
+          Statistics still counts archived purchases.
+        </p>
+      </section>
+    </>
+  )
+}
+
+function HistoryView({
+  state,
+  onDelete,
+}: {
+  state: BudgetState
+  onDelete: (id: string) => void
+}) {
+  const [openId, setOpenId] = useState<string | null>(state.history[0]?.id ?? null)
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, ArchivedPaycheck[]>()
+    for (const entry of state.history) {
+      const key = entry.archivedAt.slice(0, 7) || 'unknown'
+      const list = map.get(key) ?? []
+      list.push(entry)
+      map.set(key, list)
+    }
+    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]))
+  }, [state.history])
+
+  const monthTitle = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number)
+    if (!y || !m) return ym
+    return new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  }
+
+  return (
+    <>
+      <section className="hero-card">
+        <div className="hero-grid">
+          <div className="metric accent">
+            <span>Archived periods</span>
+            <strong>{state.history.length}</strong>
+          </div>
+          <div className="metric">
+            <span>Latest</span>
+            <strong style={{ fontSize: '1.15rem' }}>
+              {state.history[0]?.periodLabel ?? 'None yet'}
+            </strong>
+          </div>
+          <div className="metric warn">
+            <span>How to add</span>
+            <strong style={{ fontSize: '1.05rem' }}>Finish paycheck → Archive</strong>
+          </div>
+        </div>
+        <p className="hint good">
+          Look back at any past Paycheck 1 or 2 — budget setup and spending, frozen in time.
+        </p>
+      </section>
+
+      {state.history.length === 0 ? (
+        <section className="card">
+          <div className="card-head">
+            <div>
+              <h2>No history yet</h2>
+              <p>
+                When a pay period ends, open Paycheck 1 or 2 and tap{' '}
+                <strong>Archive & start new</strong>. That snapshot shows up here.
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : (
+        grouped.map(([ym, entries]) => (
+          <section className="card" key={ym}>
+            <div className="card-head">
+              <div>
+                <h2>{monthTitle(ym)}</h2>
+                <p>
+                  {entries.length} archived paycheck{entries.length === 1 ? '' : 's'}
+                </p>
+              </div>
+            </div>
+            <div className="history-list">
+              {entries.map((entry) => {
+                const math = computeBudget(entry.budget)
+                const open = openId === entry.id
+                return (
+                  <div className={`history-item ${open ? 'open' : ''}`} key={entry.id}>
+                    <button
+                      type="button"
+                      className="history-item-toggle"
+                      onClick={() => setOpenId(open ? null : entry.id)}
+                      aria-expanded={open}
+                    >
+                      <span className="history-item-main">
+                        {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                        <span>
+                          <strong>{entry.periodLabel}</strong>
+                          <span className="meta">
+                            {entry.label} · archived {entry.archivedAt} ·{' '}
+                            {entry.budget.spending.length} purchase
+                            {entry.budget.spending.length === 1 ? '' : 's'}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="history-item-pay">{formatMoney(math.paycheck)}</span>
+                    </button>
+                    {open ? (
+                      <div className="history-item-body">
+                        <div className="hero-grid" style={{ marginBottom: '0.85rem' }}>
+                          <div className="metric">
+                            <span>Paycheck</span>
+                            <strong>{formatMoney(math.paycheck)}</strong>
+                          </div>
+                          <div className="metric warn">
+                            <span>Saved</span>
+                            <strong>{formatMoney(math.savings)}</strong>
+                          </div>
+                          <div className="metric">
+                            <span>Bills</span>
+                            <strong>{formatMoney(math.immutableTotal)}</strong>
+                          </div>
+                          <div className={`metric ${math.overFixed ? 'danger' : 'accent'}`}>
+                            <span>Left to split</span>
+                            <strong>
+                              {formatMoney(
+                                math.overFixed ? math.shortfall : math.mutableBudgetTotal,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="metric">
+                            <span>Spent (flexible)</span>
+                            <strong>{formatMoney(math.totalSpentMutable)}</strong>
+                          </div>
+                          <div
+                            className={`metric ${math.totalRemainingMutable < 0 ? 'danger' : 'accent'}`}
+                          >
+                            <span>Left unspent</span>
+                            <strong>{formatMoney(math.totalRemainingMutable)}</strong>
+                          </div>
+                        </div>
+
+                        <h3 className="history-subhead">Bills</h3>
+                        {entry.budget.immutable.length === 0 ? (
+                          <p className="hint">No bills on this period.</p>
+                        ) : (
+                          <ul className="history-plain-list">
+                            {entry.budget.immutable.map((bill) => (
+                              <li key={bill.id}>
+                                <span>{bill.name}</span>
+                                <strong>{formatMoney(bill.amount)}</strong>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        <h3 className="history-subhead">Flexible split</h3>
+                        <ul className="history-plain-list">
+                          {entry.budget.mutable.map((cat) => {
+                            const budgeted = math.mutableAmounts[cat.id] || 0
+                            const spent = math.spentByCategory[cat.id] || 0
+                            return (
+                              <li key={cat.id}>
+                                <span>
+                                  {cat.name}{' '}
+                                  <span className="meta">
+                                    {cat.percent}% · spent {formatMoney(spent)}
+                                  </span>
+                                </span>
+                                <strong>{formatMoney(budgeted)}</strong>
+                              </li>
+                            )
+                          })}
+                        </ul>
+
+                        <h3 className="history-subhead">Spending log</h3>
+                        {entry.budget.spending.length === 0 ? (
+                          <p className="hint">No purchases logged.</p>
+                        ) : (
+                          <ul className="history-plain-list">
+                            {entry.budget.spending.map((spend) => {
+                              const catName =
+                                entry.budget.mutable.find((c) => c.id === spend.categoryId)
+                                  ?.name ?? 'Category'
+                              return (
+                                <li key={spend.id}>
+                                  <span>
+                                    {spend.merchant || 'Unlabeled'} · {catName}
+                                    <span className="meta">
+                                      {' '}
+                                      {spend.date}
+                                      {spend.note ? ` · ${spend.note}` : ''}
+                                    </span>
+                                  </span>
+                                  <strong>{formatMoney(spend.amount)}</strong>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        )}
+
+                        <div style={{ marginTop: '1rem' }}>
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Delete “${entry.periodLabel}” from History? This cannot be undone.`,
+                                )
+                              ) {
+                                onDelete(entry.id)
+                                setOpenId(null)
+                              }
+                            }}
+                          >
+                            <Trash2 size={16} /> Delete this period
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        ))
+      )}
     </>
   )
 }
@@ -1058,8 +1324,8 @@ export default function App() {
         <div className="brand">
           <h1>Steady</h1>
           <p>
-            Twice-a-month paycheck budgeting, cash on hand, savings jars, and a yearly
-            spending scoreboard.
+            Twice-a-month paycheck budgeting, cash on hand, savings jars, paycheck history,
+            and a yearly spending scoreboard.
           </p>
         </div>
       </header>
@@ -1096,6 +1362,14 @@ export default function App() {
         </button>
         <button
           type="button"
+          className={`main-tab ${tab === 'history' ? 'active' : ''}`}
+          onClick={() => setTab('history')}
+        >
+          <History size={16} style={{ marginRight: 4 }} />
+          History
+        </button>
+        <button
+          type="button"
           className={`main-tab ${tab === 'stats' ? 'active' : ''}`}
           onClick={() => setTab('stats')}
         >
@@ -1109,6 +1383,10 @@ export default function App() {
           budget={state.paychecks[tab]}
           onChange={(next) => setPaycheck(tab, next)}
           onResetAll={() => setState(createDefaultState())}
+          onArchive={(periodLabel) => {
+            setState((s) => archivePaycheckPeriod(s, tab, periodLabel))
+            setTab('history')
+          }}
         />
       ) : tab === 'cash' ? (
         <CashBoxView
@@ -1119,6 +1397,16 @@ export default function App() {
         <GoalsView
           state={state}
           updateGoals={(goals) => setState((s) => ({ ...s, goals }))}
+        />
+      ) : tab === 'history' ? (
+        <HistoryView
+          state={state}
+          onDelete={(id) =>
+            setState((s) => ({
+              ...s,
+              history: s.history.filter((h) => h.id !== id),
+            }))
+          }
         />
       ) : (
         <StatsView state={state} />

@@ -63,10 +63,24 @@ export interface CashBox {
   history: CashTransaction[]
 }
 
+/** Frozen copy of one paycheck period for the History tab */
+export interface ArchivedPaycheck {
+  id: string
+  paycheckKey: PaycheckKey
+  /** e.g. "Paycheck 1" */
+  label: string
+  /** e.g. "Oct 2026 · 1st half" */
+  periodLabel: string
+  archivedAt: string
+  budget: PaycheckBudget
+}
+
 export interface BudgetState {
   paychecks: Record<PaycheckKey, PaycheckBudget>
   goals: SavingsGoal[]
   cashBox: CashBox
+  /** Past paycheck periods, newest first */
+  history: ArchivedPaycheck[]
 }
 
 export interface BudgetMath {

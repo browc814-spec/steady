@@ -1,5 +1,6 @@
 import { v4 as uuid } from 'uuid'
 import type {
+  ArchivedPaycheck,
   BudgetMath,
   BudgetState,
   CashBox,
@@ -12,7 +13,7 @@ import type {
   YearStats,
 } from './types'
 
-export const STORAGE_KEY = 'steady-budget-v4'
+export const STORAGE_KEY = 'steady-budget-v5'
 
 export function createId() {
   return uuid()
@@ -115,6 +116,49 @@ function makePaycheck(label: string, paycheck: number, withSampleSpend = false):
   }
 }
 
+export function defaultPeriodLabel(paycheckKey: PaycheckKey, when = new Date()) {
+  const month = when.toLocaleString('en-US', { month: 'short' })
+  const year = when.getFullYear()
+  const half = paycheckKey === 'p1' ? '1st half' : '2nd half'
+  return `${month} ${year} · ${half}`
+}
+
+function clonePaycheck(budget: PaycheckBudget): PaycheckBudget {
+  return structuredClone(budget)
+}
+
+/** Snapshot current paycheck into History, keep setup, clear spending for the new period. */
+export function archivePaycheckPeriod(
+  state: BudgetState,
+  paycheckKey: PaycheckKey,
+  periodLabel: string,
+  archivedAt = new Date().toISOString().slice(0, 10),
+): BudgetState {
+  const current = state.paychecks[paycheckKey]
+  const entry: ArchivedPaycheck = {
+    id: createId(),
+    paycheckKey,
+    label: current.label || (paycheckKey === 'p1' ? 'Paycheck 1' : 'Paycheck 2'),
+    periodLabel: periodLabel.trim() || defaultPeriodLabel(paycheckKey),
+    archivedAt,
+    budget: clonePaycheck(current),
+  }
+
+  const nextBudget: PaycheckBudget = {
+    ...clonePaycheck(current),
+    spending: [],
+  }
+
+  return {
+    ...state,
+    paychecks: {
+      ...state.paychecks,
+      [paycheckKey]: nextBudget,
+    },
+    history: [entry, ...state.history],
+  }
+}
+
 export function createDefaultState(): BudgetState {
   const sanDiego = createId()
   const gta = createId()
@@ -123,6 +167,7 @@ export function createDefaultState(): BudgetState {
       p1: makePaycheck('Paycheck 1', 1600, true),
       p2: makePaycheck('Paycheck 2', 1600, false),
     },
+    history: [],
     goals: [
       {
         id: sanDiego,
@@ -205,10 +250,43 @@ function migrateCashBox(raw: Partial<CashBox> | undefined): CashBox {
   }
 }
 
+function migrateArchived(raw: unknown): ArchivedPaycheck[] {
+  if (!Array.isArray(raw)) return []
+  const out: ArchivedPaycheck[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Partial<ArchivedPaycheck> & { budget?: Partial<PaycheckBudget> }
+    const key: PaycheckKey = row.paycheckKey === 'p2' ? 'p2' : 'p1'
+    const fallbackLabel = key === 'p1' ? 'Paycheck 1' : 'Paycheck 2'
+    out.push({
+      id: typeof row.id === 'string' ? row.id : createId(),
+      paycheckKey: key,
+      label: typeof row.label === 'string' ? row.label : fallbackLabel,
+      periodLabel:
+        typeof row.periodLabel === 'string' && row.periodLabel.trim()
+          ? row.periodLabel
+          : defaultPeriodLabel(key),
+      archivedAt:
+        typeof row.archivedAt === 'string'
+          ? row.archivedAt
+          : new Date().toISOString().slice(0, 10),
+      budget: migratePaycheck(row.budget, {
+        label: fallbackLabel,
+        paycheck: 0,
+        savings: 0,
+        immutable: [],
+        mutable: [],
+        spending: [],
+      }),
+    })
+  }
+  return out
+}
+
 function migrateState(raw: Record<string, unknown>): BudgetState {
   const base = createDefaultState()
 
-  // New shape already
+  // Dual-paycheck shape (v4+)
   if (raw.paychecks && typeof raw.paychecks === 'object') {
     const pcs = raw.paychecks as Record<string, Partial<PaycheckBudget>>
     return {
@@ -218,6 +296,7 @@ function migrateState(raw: Record<string, unknown>): BudgetState {
       },
       goals: Array.isArray(raw.goals) ? (raw.goals as BudgetState['goals']) : base.goals,
       cashBox: migrateCashBox(raw.cashBox as Partial<CashBox> | undefined),
+      history: migrateArchived(raw.history),
     }
   }
 
@@ -247,6 +326,7 @@ function migrateState(raw: Record<string, unknown>): BudgetState {
     },
     goals: Array.isArray(raw.goals) ? (raw.goals as BudgetState['goals']) : base.goals,
     cashBox: migrateCashBox(raw.cashBox as Partial<CashBox> | undefined),
+    history: migrateArchived(raw.history),
   }
 }
 
@@ -254,6 +334,7 @@ export function loadState(): BudgetState {
   try {
     const raw =
       localStorage.getItem(STORAGE_KEY) ??
+      localStorage.getItem('steady-budget-v4') ??
       localStorage.getItem('steady-budget-v3') ??
       localStorage.getItem('steady-budget-v2') ??
       localStorage.getItem('steady-budget-v1')
@@ -341,7 +422,8 @@ export function computeBudget(budget: PaycheckBudget): BudgetMath {
 }
 
 export function allSpending(state: BudgetState): SpendEntry[] {
-  return [...state.paychecks.p1.spending, ...state.paychecks.p2.spending]
+  const archived = state.history.flatMap((h) => h.budget.spending)
+  return [...state.paychecks.p1.spending, ...state.paychecks.p2.spending, ...archived]
 }
 
 export function allCategories(state: BudgetState) {
@@ -349,6 +431,11 @@ export function allCategories(state: BudgetState) {
   for (const key of ['p1', 'p2'] as PaycheckKey[]) {
     for (const cat of state.paychecks[key].mutable) {
       map.set(cat.id, cat.name)
+    }
+  }
+  for (const archived of state.history) {
+    for (const cat of archived.budget.mutable) {
+      if (!map.has(cat.id)) map.set(cat.id, cat.name)
     }
   }
   return map
