@@ -1,7 +1,18 @@
 import { v4 as uuid } from 'uuid'
-import type { BudgetMath, BudgetState, SpendEntry, StatRow, YearStats } from './types'
+import type {
+  BudgetMath,
+  BudgetState,
+  CashBox,
+  CashTransaction,
+  CashTxType,
+  PaycheckBudget,
+  PaycheckKey,
+  SpendEntry,
+  StatRow,
+  YearStats,
+} from './types'
 
-export const STORAGE_KEY = 'steady-budget-v3'
+export const STORAGE_KEY = 'steady-budget-v4'
 
 export function createId() {
   return uuid()
@@ -28,54 +39,90 @@ function merchantKey(value: string) {
   return normalizeMerchant(value).toLowerCase()
 }
 
-export function createDefaultState(): BudgetState {
-  const year = new Date().getFullYear()
-  const groceries = createId()
-  const gas = createId()
-  const carMaint = createId()
-  const eatingOut = createId()
-  const fun = createId()
-  const misc = createId()
-  const sanDiego = createId()
-  const gta = createId()
-
-  const spending: SpendEntry[] = [
-    { id: createId(), date: `${year}-01-12`, categoryId: eatingOut, amount: 28.4, merchant: 'DoorDash', note: '' },
-    { id: createId(), date: `${year}-01-20`, categoryId: eatingOut, amount: 22.1, merchant: 'DoorDash', note: '' },
-    { id: createId(), date: `${year}-02-03`, categoryId: misc, amount: 35, merchant: 'Smoke City', note: '' },
-    { id: createId(), date: `${year}-02-18`, categoryId: groceries, amount: 84.22, merchant: 'Costco', note: '' },
-    { id: createId(), date: `${year}-03-08`, categoryId: eatingOut, amount: 31.5, merchant: 'DoorDash', note: '' },
-    { id: createId(), date: `${year}-03-22`, categoryId: gas, amount: 48, merchant: 'Shell', note: '' },
-    { id: createId(), date: `${year}-04-11`, categoryId: misc, amount: 40, merchant: 'Smoke City', note: '' },
-    { id: createId(), date: `${year}-05-02`, categoryId: fun, amount: 60, merchant: 'Steam', note: 'Sale weekend' },
-    { id: createId(), date: `${year}-05-19`, categoryId: eatingOut, amount: 19.75, merchant: 'DoorDash', note: '' },
-    { id: createId(), date: `${year}-06-07`, categoryId: groceries, amount: 96.4, merchant: 'Costco', note: '' },
-    { id: createId(), date: `${year}-07-14`, categoryId: misc, amount: 30, merchant: 'Smoke City', note: '' },
-    { id: createId(), date: `${year}-08-01`, categoryId: carMaint, amount: 75, merchant: 'Jiffy Lube', note: 'Oil change' },
-    { id: createId(), date: `${year}-08-23`, categoryId: eatingOut, amount: 26.9, merchant: 'DoorDash', note: '' },
-    { id: createId(), date: `${year}-09-09`, categoryId: gas, amount: 52.3, merchant: 'Shell', note: '' },
-    { id: createId(), date: `${year}-09-28`, categoryId: misc, amount: 38, merchant: 'Smoke City', note: '' },
+function makeMutableTemplate() {
+  return [
+    { id: createId(), name: 'Groceries', percent: 30 },
+    { id: createId(), name: 'Gas', percent: 15 },
+    { id: createId(), name: 'Car maintenance', percent: 10 },
+    { id: createId(), name: 'Eating out', percent: 15 },
+    { id: createId(), name: 'Fun money', percent: 20 },
+    { id: createId(), name: 'Misc', percent: 10 },
   ]
+}
+
+function makeImmutableTemplate() {
+  return [
+    { id: createId(), name: 'Rent (half)', amount: 600 },
+    { id: createId(), name: 'Utilities (half)', amount: 90 },
+    { id: createId(), name: 'Car payment (half)', amount: 175 },
+    { id: createId(), name: 'Phone (half)', amount: 40 },
+    { id: createId(), name: 'Debt payment (half)', amount: 100 },
+  ]
+}
+
+function makePaycheck(label: string, paycheck: number, withSampleSpend = false): PaycheckBudget {
+  const mutable = makeMutableTemplate()
+  const eatingOut = mutable.find((m) => m.name === 'Eating out')!
+  const misc = mutable.find((m) => m.name === 'Misc')!
+  const groceries = mutable.find((m) => m.name === 'Groceries')!
+  const gas = mutable.find((m) => m.name === 'Gas')!
+  const year = new Date().getFullYear()
+
+  const spending: SpendEntry[] = withSampleSpend
+    ? [
+        {
+          id: createId(),
+          date: `${year}-01-12`,
+          categoryId: eatingOut.id,
+          amount: 28.4,
+          merchant: 'DoorDash',
+          note: '',
+        },
+        {
+          id: createId(),
+          date: `${year}-02-03`,
+          categoryId: misc.id,
+          amount: 35,
+          merchant: 'Smoke City',
+          note: '',
+        },
+        {
+          id: createId(),
+          date: `${year}-02-18`,
+          categoryId: groceries.id,
+          amount: 84.22,
+          merchant: 'Costco',
+          note: '',
+        },
+        {
+          id: createId(),
+          date: `${year}-03-22`,
+          categoryId: gas.id,
+          amount: 48,
+          merchant: 'Shell',
+          note: '',
+        },
+      ]
+    : []
 
   return {
-    paycheck: 3200,
-    savings: 400,
-    immutable: [
-      { id: createId(), name: 'Rent', amount: 1200 },
-      { id: createId(), name: 'Utilities', amount: 180 },
-      { id: createId(), name: 'Car payment', amount: 350 },
-      { id: createId(), name: 'Phone', amount: 80 },
-      { id: createId(), name: 'Debt payment', amount: 200 },
-    ],
-    mutable: [
-      { id: groceries, name: 'Groceries', percent: 30 },
-      { id: gas, name: 'Gas', percent: 15 },
-      { id: carMaint, name: 'Car maintenance', percent: 10 },
-      { id: eatingOut, name: 'Eating out', percent: 15 },
-      { id: fun, name: 'Fun money', percent: 20 },
-      { id: misc, name: 'Misc', percent: 10 },
-    ],
+    label,
+    paycheck,
+    savings: 200,
+    immutable: makeImmutableTemplate(),
+    mutable,
     spending,
+  }
+}
+
+export function createDefaultState(): BudgetState {
+  const sanDiego = createId()
+  const gta = createId()
+  return {
+    paychecks: {
+      p1: makePaycheck('Paycheck 1', 1600, true),
+      p2: makePaycheck('Paycheck 2', 1600, false),
+    },
     goals: [
       {
         id: sanDiego,
@@ -104,15 +151,26 @@ export function createDefaultState(): BudgetState {
         ],
       },
     ],
+    cashBox: {
+      balance: 85,
+      history: [
+        {
+          id: createId(),
+          date: new Date().toISOString().slice(0, 10),
+          type: 'set',
+          amount: 85,
+          note: 'Starting cash on hand',
+          balanceAfter: 85,
+        },
+      ],
+    },
   }
 }
 
 function migrateSpendEntry(raw: Partial<SpendEntry>): SpendEntry {
   const note = typeof raw.note === 'string' ? raw.note : ''
   const merchantRaw =
-    typeof raw.merchant === 'string' && raw.merchant.trim()
-      ? raw.merchant
-      : note
+    typeof raw.merchant === 'string' && raw.merchant.trim() ? raw.merchant : note
   return {
     id: typeof raw.id === 'string' ? raw.id : createId(),
     date: typeof raw.date === 'string' ? raw.date : new Date().toISOString().slice(0, 10),
@@ -123,17 +181,72 @@ function migrateSpendEntry(raw: Partial<SpendEntry>): SpendEntry {
   }
 }
 
-function migrateState(raw: Partial<BudgetState>): BudgetState {
-  const base = createDefaultState()
+function migratePaycheck(raw: Partial<PaycheckBudget> | undefined, fallback: PaycheckBudget): PaycheckBudget {
+  if (!raw) return fallback
   return {
-    paycheck: typeof raw.paycheck === 'number' ? raw.paycheck : base.paycheck,
-    savings: typeof raw.savings === 'number' ? raw.savings : base.savings,
-    immutable: Array.isArray(raw.immutable) ? raw.immutable : base.immutable,
-    mutable: Array.isArray(raw.mutable) ? raw.mutable : base.mutable,
+    label: typeof raw.label === 'string' ? raw.label : fallback.label,
+    paycheck: typeof raw.paycheck === 'number' ? raw.paycheck : fallback.paycheck,
+    savings: typeof raw.savings === 'number' ? raw.savings : fallback.savings,
+    immutable: Array.isArray(raw.immutable) ? raw.immutable : fallback.immutable,
+    mutable: Array.isArray(raw.mutable) ? raw.mutable : fallback.mutable,
     spending: Array.isArray(raw.spending)
       ? raw.spending.map((s) => migrateSpendEntry(s as Partial<SpendEntry>))
-      : base.spending,
-    goals: Array.isArray(raw.goals) ? raw.goals : base.goals,
+      : [],
+  }
+}
+
+function migrateCashBox(raw: Partial<CashBox> | undefined): CashBox {
+  if (!raw) {
+    return { balance: 0, history: [] }
+  }
+  return {
+    balance: money(Number(raw.balance) || 0),
+    history: Array.isArray(raw.history) ? (raw.history as CashTransaction[]) : [],
+  }
+}
+
+function migrateState(raw: Record<string, unknown>): BudgetState {
+  const base = createDefaultState()
+
+  // New shape already
+  if (raw.paychecks && typeof raw.paychecks === 'object') {
+    const pcs = raw.paychecks as Record<string, Partial<PaycheckBudget>>
+    return {
+      paychecks: {
+        p1: migratePaycheck(pcs.p1, base.paychecks.p1),
+        p2: migratePaycheck(pcs.p2, base.paychecks.p2),
+      },
+      goals: Array.isArray(raw.goals) ? (raw.goals as BudgetState['goals']) : base.goals,
+      cashBox: migrateCashBox(raw.cashBox as Partial<CashBox> | undefined),
+    }
+  }
+
+  // Old single-paycheck shape → put everything in Paycheck 1
+  const oldSpending = Array.isArray(raw.spending)
+    ? (raw.spending as Partial<SpendEntry>[]).map(migrateSpendEntry)
+    : []
+
+  return {
+    paychecks: {
+      p1: {
+        label: 'Paycheck 1',
+        paycheck: typeof raw.paycheck === 'number' ? raw.paycheck : base.paychecks.p1.paycheck,
+        savings: typeof raw.savings === 'number' ? raw.savings : base.paychecks.p1.savings,
+        immutable: Array.isArray(raw.immutable)
+          ? (raw.immutable as PaycheckBudget['immutable'])
+          : base.paychecks.p1.immutable,
+        mutable: Array.isArray(raw.mutable)
+          ? (raw.mutable as PaycheckBudget['mutable'])
+          : base.paychecks.p1.mutable,
+        spending: oldSpending,
+      },
+      p2: {
+        ...base.paychecks.p2,
+        spending: [],
+      },
+    },
+    goals: Array.isArray(raw.goals) ? (raw.goals as BudgetState['goals']) : base.goals,
+    cashBox: migrateCashBox(raw.cashBox as Partial<CashBox> | undefined),
   }
 }
 
@@ -141,11 +254,11 @@ export function loadState(): BudgetState {
   try {
     const raw =
       localStorage.getItem(STORAGE_KEY) ??
+      localStorage.getItem('steady-budget-v3') ??
       localStorage.getItem('steady-budget-v2') ??
       localStorage.getItem('steady-budget-v1')
     if (!raw) return createDefaultState()
-    const parsed = JSON.parse(raw) as Partial<BudgetState>
-    if (!parsed || typeof parsed.paycheck !== 'number') return createDefaultState()
+    const parsed = JSON.parse(raw) as Record<string, unknown>
     return migrateState(parsed)
   } catch {
     return createDefaultState()
@@ -167,37 +280,37 @@ export function goalProgress(goal: { target: number; deposits: { amount: number 
   return Math.min(100, (saved / target) * 100)
 }
 
-export function computeBudget(state: BudgetState): BudgetMath {
-  const paycheck = money(state.paycheck)
-  const savings = money(state.savings)
+export function computeBudget(budget: PaycheckBudget): BudgetMath {
+  const paycheck = money(budget.paycheck)
+  const savings = money(budget.savings)
   const immutableTotal = money(
-    state.immutable.reduce((sum, item) => sum + (Number(item.amount) || 0), 0),
+    budget.immutable.reduce((sum, item) => sum + (Number(item.amount) || 0), 0),
   )
   const afterSavings = money(paycheck - savings)
   const afterImmutable = money(afterSavings - immutableTotal)
   const overFixed = afterImmutable < 0
   const mutableBudgetTotal = overFixed ? 0 : afterImmutable
   const percentTotal = money(
-    state.mutable.reduce((sum, item) => sum + (Number(item.percent) || 0), 0),
+    budget.mutable.reduce((sum, item) => sum + (Number(item.percent) || 0), 0),
   )
   const percentOk = Math.abs(percentTotal - 100) < 0.01
 
   const mutableAmounts: Record<string, number> = {}
-  for (const cat of state.mutable) {
+  for (const cat of budget.mutable) {
     const pct = Number(cat.percent) || 0
     mutableAmounts[cat.id] = money((mutableBudgetTotal * pct) / 100)
   }
 
   const spentByCategory: Record<string, number> = {}
-  for (const cat of state.mutable) spentByCategory[cat.id] = 0
-  for (const entry of state.spending) {
+  for (const cat of budget.mutable) spentByCategory[cat.id] = 0
+  for (const entry of budget.spending) {
     spentByCategory[entry.categoryId] = money(
       (spentByCategory[entry.categoryId] || 0) + (Number(entry.amount) || 0),
     )
   }
 
   const remainingByCategory: Record<string, number> = {}
-  for (const cat of state.mutable) {
+  for (const cat of budget.mutable) {
     remainingByCategory[cat.id] = money(
       (mutableAmounts[cat.id] || 0) - (spentByCategory[cat.id] || 0),
     )
@@ -227,6 +340,48 @@ export function computeBudget(state: BudgetState): BudgetMath {
   }
 }
 
+export function allSpending(state: BudgetState): SpendEntry[] {
+  return [...state.paychecks.p1.spending, ...state.paychecks.p2.spending]
+}
+
+export function allCategories(state: BudgetState) {
+  const map = new Map<string, string>()
+  for (const key of ['p1', 'p2'] as PaycheckKey[]) {
+    for (const cat of state.paychecks[key].mutable) {
+      map.set(cat.id, cat.name)
+    }
+  }
+  return map
+}
+
+export function applyCashTransaction(
+  cashBox: CashBox,
+  type: CashTxType,
+  amountInput: number,
+  note: string,
+  date: string,
+): CashBox {
+  const amount = money(Math.abs(amountInput))
+  let next = money(cashBox.balance)
+  if (type === 'set') next = amount
+  if (type === 'add') next = money(next + amount)
+  if (type === 'spend') next = money(next - amount)
+
+  const tx: CashTransaction = {
+    id: createId(),
+    date,
+    type,
+    amount,
+    note: note.trim(),
+    balanceAfter: next,
+  }
+
+  return {
+    balance: next,
+    history: [tx, ...cashBox.history],
+  }
+}
+
 const MONTH_LABELS = [
   'Jan',
   'Feb',
@@ -246,7 +401,7 @@ export function availableStatYears(state: BudgetState): number[] {
   const years = new Set<number>()
   const current = new Date().getFullYear()
   years.add(current)
-  for (const entry of state.spending) {
+  for (const entry of allSpending(state)) {
     const y = Number(entry.date?.slice(0, 4))
     if (Number.isFinite(y)) years.add(y)
   }
@@ -254,16 +409,17 @@ export function availableStatYears(state: BudgetState): number[] {
 }
 
 export function computeYearStats(state: BudgetState, year: number): YearStats {
-  const entries = state.spending.filter((e) => e.date?.startsWith(String(year)))
+  const entries = allSpending(state).filter((e) => e.date?.startsWith(String(year)))
   const total = money(entries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0))
+  const catNames = allCategories(state)
 
   const categoryMap = new Map<string, { label: string; amount: number; count: number }>()
-  for (const cat of state.mutable) {
-    categoryMap.set(cat.id, { label: cat.name, amount: 0, count: 0 })
+  for (const [id, name] of catNames) {
+    categoryMap.set(id, { label: name, amount: 0, count: 0 })
   }
   for (const entry of entries) {
     const existing = categoryMap.get(entry.categoryId) ?? {
-      label: 'Other / old category',
+      label: catNames.get(entry.categoryId) ?? 'Other / old category',
       amount: 0,
       count: 0,
     }
@@ -279,7 +435,6 @@ export function computeYearStats(state: BudgetState, year: number): YearStats {
     const existing = merchantMap.get(key) ?? { label, amount: 0, count: 0 }
     existing.amount = money(existing.amount + (Number(entry.amount) || 0))
     existing.count += 1
-    // Prefer first non-empty casing as display label
     if (!existing.label && label) existing.label = label
     merchantMap.set(key, existing)
   }

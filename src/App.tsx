@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2, RotateCcw } from 'lucide-react'
-import type { BudgetState, MutableCategory, SavingsGoal, SpendEntry } from './types'
+import { Plus, Trash2, RotateCcw, Wallet, Banknote } from 'lucide-react'
+import type {
+  BudgetState,
+  CashTxType,
+  MutableCategory,
+  PaycheckBudget,
+  PaycheckKey,
+  SavingsGoal,
+  SpendEntry,
+} from './types'
 import {
+  applyCashTransaction,
   availableStatYears,
   computeBudget,
   computeYearStats,
@@ -15,7 +24,7 @@ import {
   saveState,
 } from './math'
 
-type MainTab = 'budget' | 'goals' | 'stats'
+type MainTab = PaycheckKey | 'cash' | 'goals' | 'stats'
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
@@ -28,16 +37,17 @@ function parseMoneyInput(value: string) {
 }
 
 function BudgetView({
-  state,
-  math,
-  update,
-  onReset,
+  paycheckKey,
+  budget,
+  onChange,
+  onResetAll,
 }: {
-  state: BudgetState
-  math: ReturnType<typeof computeBudget>
-  update: (patch: Partial<BudgetState>) => void
-  onReset: () => void
+  paycheckKey: PaycheckKey
+  budget: PaycheckBudget
+  onChange: (next: PaycheckBudget) => void
+  onResetAll: () => void
 }) {
+  const math = useMemo(() => computeBudget(budget), [budget])
   const [logDate, setLogDate] = useState(todayISO)
   const [logCategoryId, setLogCategoryId] = useState('')
   const [logAmount, setLogAmount] = useState('')
@@ -45,22 +55,24 @@ function BudgetView({
   const [logNote, setLogNote] = useState('')
 
   useEffect(() => {
-    if (!logCategoryId && state.mutable[0]) {
-      setLogCategoryId(state.mutable[0].id)
-    } else if (logCategoryId && !state.mutable.find((c) => c.id === logCategoryId)) {
-      setLogCategoryId(state.mutable[0]?.id ?? '')
+    if (!logCategoryId && budget.mutable[0]) {
+      setLogCategoryId(budget.mutable[0].id)
+    } else if (logCategoryId && !budget.mutable.find((c) => c.id === logCategoryId)) {
+      setLogCategoryId(budget.mutable[0]?.id ?? '')
     }
-  }, [state.mutable, logCategoryId])
+  }, [budget.mutable, logCategoryId])
+
+  const patch = (partial: Partial<PaycheckBudget>) => onChange({ ...budget, ...partial })
 
   const addImmutable = () => {
-    update({
-      immutable: [...state.immutable, { id: createId(), name: 'New bill', amount: 0 }],
+    patch({
+      immutable: [...budget.immutable, { id: createId(), name: 'New bill', amount: 0 }],
     })
   }
 
   const addMutable = () => {
-    update({
-      mutable: [...state.mutable, { id: createId(), name: 'New category', percent: 0 }],
+    patch({
+      mutable: [...budget.mutable, { id: createId(), name: 'New category', percent: 0 }],
     })
   }
 
@@ -76,21 +88,23 @@ function BudgetView({
       merchant,
       note: logNote.trim(),
     }
-    update({ spending: [entry, ...state.spending] })
+    patch({ spending: [entry, ...budget.spending] })
     setLogAmount('')
     setLogMerchant('')
     setLogNote('')
   }
 
   const categoryName = (id: string) =>
-    state.mutable.find((c) => c.id === id)?.name ?? 'Unknown'
+    budget.mutable.find((c) => c.id === id)?.name ?? 'Unknown'
 
   const stepsDone = {
-    pay: state.paycheck > 0,
+    pay: budget.paycheck > 0,
     save: true,
-    fixed: state.immutable.length > 0,
+    fixed: budget.immutable.length > 0,
     split: math.percentOk && !math.overFixed,
   }
+
+  const title = paycheckKey === 'p1' ? 'Paycheck 1' : 'Paycheck 2'
 
   return (
     <>
@@ -105,7 +119,7 @@ function BudgetView({
       <section className="hero-card">
         <div className="hero-grid">
           <div className="metric">
-            <span>Paycheck</span>
+            <span>{title}</span>
             <strong>{formatMoney(math.paycheck)}</strong>
           </div>
           <div className={`metric ${math.overFixed ? 'danger' : 'warn'}`}>
@@ -121,13 +135,13 @@ function BudgetView({
         </div>
         {math.overFixed ? (
           <p className="hint bad">
-            Your savings + bills are bigger than your paycheck by{' '}
-            {formatMoney(math.shortfall)}. Lower savings or a bill amount to continue.
+            Savings + bills are bigger than this paycheck by {formatMoney(math.shortfall)}.
+            Lower savings or a bill to continue.
           </p>
         ) : (
           <p className="hint good">
-            After savings and bills, you have {formatMoney(math.mutableBudgetTotal)} to
-            split across groceries, gas, fun, and the rest.
+            After savings and bills on {title}, you have{' '}
+            {formatMoney(math.mutableBudgetTotal)} to split across flexible spending.
           </p>
         )}
       </section>
@@ -135,15 +149,15 @@ function BudgetView({
       <section className="card">
         <div className="card-head">
           <div>
-            <h2>1. Your paycheck</h2>
-            <p>Type what hits your bank this pay period. Just the number.</p>
+            <h2>1. {title}</h2>
+            <p>Enter what hits your bank for this half of the month.</p>
           </div>
           <button
             type="button"
             className="btn btn-ghost"
             onClick={() => {
-              if (confirm('Reset everything back to the starter example?')) {
-                onReset()
+              if (confirm('Reset everything (both paychecks, goals, cash) to the demo?')) {
+                onResetAll()
               }
             }}
           >
@@ -156,24 +170,24 @@ function BudgetView({
             <input
               className="input money"
               inputMode="decimal"
-              value={state.paycheck}
-              onChange={(e) => update({ paycheck: parseMoneyInput(e.target.value) })}
+              value={budget.paycheck}
+              onChange={(e) => patch({ paycheck: parseMoneyInput(e.target.value) })}
             />
           </label>
           <label className="field">
-            <span>I want to save</span>
+            <span>I want to save from this check</span>
             <input
               className="input money"
               inputMode="decimal"
-              value={state.savings}
-              onChange={(e) => update({ savings: parseMoneyInput(e.target.value) })}
+              value={budget.savings}
+              onChange={(e) => patch({ savings: parseMoneyInput(e.target.value) })}
             />
           </label>
         </div>
         <p className="hint">
           After saving {formatMoney(math.savings)}, you have{' '}
-          <strong>{formatMoney(math.afterSavings)}</strong> left for bills and spending.
-          Tip: move some of that savings into a Goals tab below.
+          <strong>{formatMoney(math.afterSavings)}</strong> left for bills and spending on
+          this paycheck.
         </p>
       </section>
 
@@ -181,21 +195,24 @@ function BudgetView({
         <div className="card-head">
           <div>
             <h2>2. Immutable spending</h2>
-            <p>Rent, bills, debt, subscriptions — stuff that doesn’t change much.</p>
+            <p>
+              Bills for this paycheck only. Tip: put half of monthly bills on each paycheck
+              tab.
+            </p>
           </div>
           <button type="button" className="btn btn-primary" onClick={addImmutable}>
             <Plus size={16} /> Add bill
           </button>
         </div>
         <div className="list">
-          {state.immutable.map((item) => (
+          {budget.immutable.map((item) => (
             <div className="list-row" key={item.id}>
               <input
                 className="input"
                 value={item.name}
                 onChange={(e) =>
-                  update({
-                    immutable: state.immutable.map((x) =>
+                  patch({
+                    immutable: budget.immutable.map((x) =>
                       x.id === item.id ? { ...x, name: e.target.value } : x,
                     ),
                   })
@@ -207,8 +224,8 @@ function BudgetView({
                 inputMode="decimal"
                 value={item.amount}
                 onChange={(e) =>
-                  update({
-                    immutable: state.immutable.map((x) =>
+                  patch({
+                    immutable: budget.immutable.map((x) =>
                       x.id === item.id
                         ? { ...x, amount: parseMoneyInput(e.target.value) }
                         : x,
@@ -222,8 +239,8 @@ function BudgetView({
                 className="btn btn-danger"
                 aria-label={`Delete ${item.name}`}
                 onClick={() =>
-                  update({
-                    immutable: state.immutable.filter((x) => x.id !== item.id),
+                  patch({
+                    immutable: budget.immutable.filter((x) => x.id !== item.id),
                   })
                 }
               >
@@ -247,10 +264,7 @@ function BudgetView({
         <div className="card-head">
           <div>
             <h2>3. Mutable spending (percent split)</h2>
-            <p>
-              Tell Steady what % of the leftover each category gets. It fills in the dollar
-              amounts for you.
-            </p>
+            <p>Split what’s left after bills. Percents must add up to 100%.</p>
           </div>
           <button type="button" className="btn btn-primary" onClick={addMutable}>
             <Plus size={16} /> Add category
@@ -260,7 +274,7 @@ function BudgetView({
         {!math.percentOk && (
           <p className="hint warn">
             Your percentages add up to {math.percentTotal}%. They need to equal{' '}
-            <strong>100%</strong> before this is ready.
+            <strong>100%</strong>.
           </p>
         )}
 
@@ -284,14 +298,14 @@ function BudgetView({
         </div>
 
         <div className="list">
-          {state.mutable.map((cat: MutableCategory) => (
+          {budget.mutable.map((cat: MutableCategory) => (
             <div className="mutable-row" key={cat.id}>
               <input
                 className="input"
                 value={cat.name}
                 onChange={(e) =>
-                  update({
-                    mutable: state.mutable.map((x) =>
+                  patch({
+                    mutable: budget.mutable.map((x) =>
                       x.id === cat.id ? { ...x, name: e.target.value } : x,
                     ),
                   })
@@ -303,8 +317,8 @@ function BudgetView({
                 inputMode="decimal"
                 value={cat.percent}
                 onChange={(e) =>
-                  update({
-                    mutable: state.mutable.map((x) =>
+                  patch({
+                    mutable: budget.mutable.map((x) =>
                       x.id === cat.id
                         ? { ...x, percent: parseMoneyInput(e.target.value) }
                         : x,
@@ -313,7 +327,7 @@ function BudgetView({
                 }
                 aria-label={`${cat.name} percent`}
               />
-              <div className="amount-out" aria-label={`${cat.name} budgeted amount`}>
+              <div className="amount-out">
                 {formatMoney(math.mutableAmounts[cat.id] || 0)}
               </div>
               <div className="delete-slot">
@@ -321,12 +335,12 @@ function BudgetView({
                   type="button"
                   className="btn btn-danger"
                   aria-label={`Delete ${cat.name}`}
-                  onClick={() => {
-                    update({
-                      mutable: state.mutable.filter((x) => x.id !== cat.id),
-                      spending: state.spending.filter((s) => s.categoryId !== cat.id),
+                  onClick={() =>
+                    patch({
+                      mutable: budget.mutable.filter((x) => x.id !== cat.id),
+                      spending: budget.spending.filter((s) => s.categoryId !== cat.id),
                     })
-                  }}
+                  }
                 >
                   <Trash2 size={16} />
                 </button>
@@ -348,11 +362,11 @@ function BudgetView({
         <div className="card-head">
           <div>
             <h2>4. What’s left in each category</h2>
-            <p>Live balances after your logged purchases.</p>
+            <p>Balances for this paycheck after logged purchases.</p>
           </div>
         </div>
         <div className="cat-grid">
-          {state.mutable.map((cat) => {
+          {budget.mutable.map((cat) => {
             const budgeted = math.mutableAmounts[cat.id] || 0
             const spent = math.spentByCategory[cat.id] || 0
             const left = math.remainingByCategory[cat.id] || 0
@@ -374,25 +388,13 @@ function BudgetView({
             )
           })}
         </div>
-        <div className="totals-bar">
-          <span>
-            Spent from flexible budget:{' '}
-            <strong>{formatMoney(math.totalSpentMutable)}</strong>
-          </span>
-          <span>
-            Still available: <strong>{formatMoney(math.totalRemainingMutable)}</strong>
-          </span>
-        </div>
       </section>
 
       <section className="card">
         <div className="card-head">
           <div>
             <h2>5. Log spending</h2>
-            <p>
-              Bought something? Add the store/item name (DoorDash, Smoke City, Costco…) so
-              Statistics can tally it all year.
-            </p>
+            <p>Purchases for {title}. Use store names so Statistics can tally them.</p>
           </div>
         </div>
 
@@ -413,7 +415,7 @@ function BudgetView({
               value={logCategoryId}
               onChange={(e) => setLogCategoryId(e.target.value)}
             >
-              {state.mutable.map((cat) => (
+              {budget.mutable.map((cat) => (
                 <option key={cat.id} value={cat.id}>
                   {cat.name}
                 </option>
@@ -443,12 +445,12 @@ function BudgetView({
               placeholder="e.g. DoorDash, Smoke City, Costco"
               value={logMerchant}
               onChange={(e) => setLogMerchant(e.target.value)}
-              list="merchant-suggestions"
+              list={`merchant-suggestions-${paycheckKey}`}
             />
-            <datalist id="merchant-suggestions">
+            <datalist id={`merchant-suggestions-${paycheckKey}`}>
               {[
                 ...new Set(
-                  state.spending
+                  budget.spending
                     .map((s) => s.merchant)
                     .filter(Boolean)
                     .sort((a, b) => a.localeCompare(b)),
@@ -470,10 +472,10 @@ function BudgetView({
         </div>
 
         <div className="spend-list">
-          {state.spending.length === 0 ? (
-            <div className="empty">No purchases logged yet.</div>
+          {budget.spending.length === 0 ? (
+            <div className="empty">No purchases logged on {title} yet.</div>
           ) : (
-            state.spending.map((entry) => (
+            budget.spending.map((entry) => (
               <div className="spend-item" key={entry.id}>
                 <div>
                   <strong>
@@ -490,8 +492,8 @@ function BudgetView({
                   className="btn btn-danger"
                   aria-label="Delete purchase"
                   onClick={() =>
-                    update({
-                      spending: state.spending.filter((s) => s.id !== entry.id),
+                    patch({
+                      spending: budget.spending.filter((s) => s.id !== entry.id),
                     })
                   }
                 >
@@ -506,12 +508,165 @@ function BudgetView({
   )
 }
 
-function GoalsView({
+function CashBoxView({
   state,
-  update,
+  onChange,
 }: {
   state: BudgetState
-  update: (patch: Partial<BudgetState>) => void
+  onChange: (cashBox: BudgetState['cashBox']) => void
+}) {
+  const [mode, setMode] = useState<CashTxType>('add')
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+
+  const submit = () => {
+    const value = parseMoneyInput(amount)
+    if (value <= 0 && mode !== 'set') return
+    if (mode === 'set' && amount.trim() === '') return
+    onChange(
+      applyCashTransaction(state.cashBox, mode, value, note, todayISO()),
+    )
+    setAmount('')
+    setNote('')
+  }
+
+  const modeLabel =
+    mode === 'set' ? 'Set balance to' : mode === 'add' ? 'Add cash' : 'Spend cash'
+
+  return (
+    <>
+      <section className="hero-card">
+        <div className="hero-grid">
+          <div className="metric accent">
+            <span>Cash on hand</span>
+            <strong>{formatMoney(state.cashBox.balance)}</strong>
+          </div>
+          <div className="metric">
+            <span>Updates logged</span>
+            <strong>{state.cashBox.history.length}</strong>
+          </div>
+          <div className="metric warn">
+            <span>Last update</span>
+            <strong style={{ fontSize: '1.2rem' }}>
+              {state.cashBox.history[0]?.date ?? '—'}
+            </strong>
+          </div>
+        </div>
+        <p className="hint good">
+          This is physical cash in your wallet / stash — separate from paycheck budgeting.
+        </p>
+      </section>
+
+      <section className="card">
+        <div className="card-head">
+          <div>
+            <h2>Cash box</h2>
+            <p>Record what you actually have in cash, then add or spend from it.</p>
+          </div>
+        </div>
+
+        <div className="steps" style={{ marginBottom: '1rem' }}>
+          <button
+            type="button"
+            className={`step-pill ${mode === 'set' ? 'active' : ''}`}
+            onClick={() => setMode('set')}
+          >
+            Set balance
+          </button>
+          <button
+            type="button"
+            className={`step-pill ${mode === 'add' ? 'active' : ''}`}
+            onClick={() => setMode('add')}
+          >
+            Add cash
+          </button>
+          <button
+            type="button"
+            className={`step-pill ${mode === 'spend' ? 'active' : ''}`}
+            onClick={() => setMode('spend')}
+          >
+            Spend cash
+          </button>
+        </div>
+
+        <div className="field-row">
+          <label className="field">
+            <span>{modeLabel}</span>
+            <input
+              className="input money"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Note (optional)</span>
+            <input
+              className="input"
+              placeholder="e.g. ATM, tip jar, gas station"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="toolbar" style={{ marginTop: '0.85rem' }}>
+          <button type="button" className="btn btn-primary" onClick={submit}>
+            <Wallet size={16} /> Save cash update
+          </button>
+        </div>
+
+        <div className="spend-list" style={{ marginTop: '1.1rem' }}>
+          {state.cashBox.history.length === 0 ? (
+            <div className="empty">No cash updates yet.</div>
+          ) : (
+            state.cashBox.history.map((tx) => (
+              <div className="spend-item" key={tx.id}>
+                <div>
+                  <strong>
+                    {tx.type === 'set'
+                      ? 'Set balance'
+                      : tx.type === 'add'
+                        ? 'Added cash'
+                        : 'Spent cash'}
+                  </strong>
+                  <p>
+                    {tx.date}
+                    {tx.note ? ` · ${tx.note}` : ''} · balance {formatMoney(tx.balanceAfter)}
+                  </p>
+                </div>
+                <strong>
+                  {tx.type === 'spend' ? '−' : tx.type === 'add' ? '+' : ''}
+                  {formatMoney(tx.amount)}
+                </strong>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  aria-label="Delete cash update"
+                  onClick={() => {
+                    const history = state.cashBox.history.filter((h) => h.id !== tx.id)
+                    const balance = history[0]?.balanceAfter ?? 0
+                    onChange({ balance, history })
+                  }}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+    </>
+  )
+}
+
+function GoalsView({
+  state,
+  updateGoals,
+}: {
+  state: BudgetState
+  updateGoals: (goals: SavingsGoal[]) => void
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(state.goals[0]?.id ?? null)
   const [depositAmount, setDepositAmount] = useState('')
@@ -536,14 +691,12 @@ function GoalsView({
       target: 100,
       deposits: [],
     }
-    update({ goals: [...state.goals, goal] })
+    updateGoals([...state.goals, goal])
     setSelectedId(goal.id)
   }
 
   const patchGoal = (id: string, patch: Partial<SavingsGoal>) => {
-    update({
-      goals: state.goals.map((g) => (g.id === id ? { ...g, ...patch } : g)),
-    })
+    updateGoals(state.goals.map((g) => (g.id === id ? { ...g, ...patch } : g)))
   }
 
   const addDeposit = () => {
@@ -695,7 +848,7 @@ function GoalsView({
                         <span>Note (optional)</span>
                         <input
                           className="input"
-                          placeholder="From this paycheck"
+                          placeholder="From paycheck 1"
                           value={depositNote}
                           onChange={(e) => setDepositNote(e.target.value)}
                         />
@@ -710,24 +863,13 @@ function GoalsView({
                       className="btn btn-danger"
                       onClick={() => {
                         if (confirm(`Delete goal “${selected.name}”?`)) {
-                          update({
-                            goals: state.goals.filter((g) => g.id !== selected.id),
-                          })
+                          updateGoals(state.goals.filter((g) => g.id !== selected.id))
                         }
                       }}
                     >
                       <Trash2 size={16} /> Delete this goal
                     </button>
                   </div>
-                </div>
-
-                <div className="totals-bar">
-                  <span>
-                    Progress: <strong>{Math.round(progress)}%</strong>
-                  </span>
-                  <span>
-                    Deposits: <strong>{selected.deposits.length}</strong>
-                  </span>
                 </div>
 
                 <div className="spend-list" style={{ marginTop: '0.85rem' }}>
@@ -797,8 +939,7 @@ function StatsView({ state }: { state: BudgetState }) {
           </div>
         </div>
         <p className="hint good">
-          Every logged purchase piles up here for the year — by category and by store/item
-          name (DoorDash, Smoke City, and anything else you type).
+          Totals include purchases from both Paycheck 1 and Paycheck 2 for the whole year.
         </p>
       </section>
 
@@ -806,7 +947,7 @@ function StatsView({ state }: { state: BudgetState }) {
         <div className="card-head">
           <div>
             <h2>Statistics</h2>
-            <p>Pick a year. Steady totals everything you logged in that year.</p>
+            <p>Yearly scoreboard by store/item, category, and month.</p>
           </div>
         </div>
         <div className="stat-toolbar">
@@ -828,8 +969,8 @@ function StatsView({ state }: { state: BudgetState }) {
 
         {stats.entryCount === 0 ? (
           <div className="empty">
-            No purchases logged in {year} yet. Log spending on the paycheck tab with a store
-            / item name to start building stats.
+            No purchases logged in {year} yet. Log spending on a paycheck tab to build
+            stats.
           </div>
         ) : (
           <>
@@ -898,14 +1039,18 @@ function StatsView({ state }: { state: BudgetState }) {
 
 export default function App() {
   const [state, setState] = useState<BudgetState>(() => loadState())
-  const [tab, setTab] = useState<MainTab>('budget')
-  const math = useMemo(() => computeBudget(state), [state])
+  const [tab, setTab] = useState<MainTab>('p1')
 
   useEffect(() => {
     saveState(state)
   }, [state])
 
-  const update = (patch: Partial<BudgetState>) => setState((s) => ({ ...s, ...patch }))
+  const setPaycheck = (key: PaycheckKey, next: PaycheckBudget) => {
+    setState((s) => ({
+      ...s,
+      paychecks: { ...s.paychecks, [key]: next },
+    }))
+  }
 
   return (
     <div className="app">
@@ -913,8 +1058,8 @@ export default function App() {
         <div className="brand">
           <h1>Steady</h1>
           <p>
-            Idiot-proof paycheck budgeting, savings goal jars, and a year-long spending
-            scoreboard.
+            Twice-a-month paycheck budgeting, cash on hand, savings jars, and a yearly
+            spending scoreboard.
           </p>
         </div>
       </header>
@@ -922,17 +1067,32 @@ export default function App() {
       <nav className="main-tabs" aria-label="Main">
         <button
           type="button"
-          className={`main-tab ${tab === 'budget' ? 'active' : ''}`}
-          onClick={() => setTab('budget')}
+          className={`main-tab ${tab === 'p1' ? 'active' : ''}`}
+          onClick={() => setTab('p1')}
         >
-          This paycheck
+          Paycheck 1
+        </button>
+        <button
+          type="button"
+          className={`main-tab ${tab === 'p2' ? 'active' : ''}`}
+          onClick={() => setTab('p2')}
+        >
+          Paycheck 2
+        </button>
+        <button
+          type="button"
+          className={`main-tab ${tab === 'cash' ? 'active' : ''}`}
+          onClick={() => setTab('cash')}
+        >
+          <Banknote size={16} style={{ marginRight: 4 }} />
+          Cash box
         </button>
         <button
           type="button"
           className={`main-tab ${tab === 'goals' ? 'active' : ''}`}
           onClick={() => setTab('goals')}
         >
-          Savings goals
+          Goals
         </button>
         <button
           type="button"
@@ -943,15 +1103,23 @@ export default function App() {
         </button>
       </nav>
 
-      {tab === 'budget' ? (
+      {tab === 'p1' || tab === 'p2' ? (
         <BudgetView
+          paycheckKey={tab}
+          budget={state.paychecks[tab]}
+          onChange={(next) => setPaycheck(tab, next)}
+          onResetAll={() => setState(createDefaultState())}
+        />
+      ) : tab === 'cash' ? (
+        <CashBoxView
           state={state}
-          math={math}
-          update={update}
-          onReset={() => setState(createDefaultState())}
+          onChange={(cashBox) => setState((s) => ({ ...s, cashBox }))}
         />
       ) : tab === 'goals' ? (
-        <GoalsView state={state} update={update} />
+        <GoalsView
+          state={state}
+          updateGoals={(goals) => setState((s) => ({ ...s, goals }))}
+        />
       ) : (
         <StatsView state={state} />
       )}

@@ -521,10 +521,11 @@ label.field > span {
 
 .main-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
   margin-bottom: 1rem;
   padding: 0.35rem;
-  border-radius: 999px;
+  border-radius: 18px;
   background: rgba(251, 252, 251, 0.8);
   border: 1px solid var(--line);
   width: fit-content;

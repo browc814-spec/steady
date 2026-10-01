@@ -1,4 +1,5 @@
 export type Money = number
+export type PaycheckKey = 'p1' | 'p2'
 
 export interface ImmutableItem {
   id: string
@@ -36,13 +37,36 @@ export interface SavingsGoal {
   deposits: GoalDeposit[]
 }
 
-export interface BudgetState {
+export interface PaycheckBudget {
+  label: string
   paycheck: number
   savings: number
   immutable: ImmutableItem[]
   mutable: MutableCategory[]
   spending: SpendEntry[]
+}
+
+export type CashTxType = 'set' | 'add' | 'spend'
+
+export interface CashTransaction {
+  id: string
+  date: string
+  type: CashTxType
+  amount: number
+  note: string
+  /** Balance after this transaction */
+  balanceAfter: number
+}
+
+export interface CashBox {
+  balance: number
+  history: CashTransaction[]
+}
+
+export interface BudgetState {
+  paychecks: Record<PaycheckKey, PaycheckBudget>
   goals: SavingsGoal[]
+  cashBox: CashBox
 }
 
 export interface BudgetMath {
