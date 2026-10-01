@@ -1,6 +1,6 @@
 # Steady
 
-Idiot-proof paycheck budgeting with savings goals and yearly spending stats.
+Idiot-proof paycheck budgeting with Paycheck 1/2, a Cash box, savings goals, and yearly spending stats.
 
 ## Local
 
@@ -9,9 +9,16 @@ npm install
 npm run dev
 ```
 
-## Deploy (GitHub + Netlify)
+## Live
 
-Netlify builds from this repo automatically:
+- **GitHub Pages:** https://browc814-spec.github.io/steady/
+- **Netlify (claimed):** https://snazzy-centaur-606f26.netlify.app
 
-- Build command: `npm run build`
-- Publish folder: `dist`
+## Deploy
+
+```bash
+npm run build
+```
+
+- **GitHub Pages:** publish the `dist` folder on the `gh-pages` branch
+- **Netlify:** build command `npm run build`, publish folder `dist`
