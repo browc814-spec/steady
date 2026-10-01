@@ -1,6 +1,6 @@
 # Steady
 
-Idiot-proof paycheck budgeting with Paycheck 1/2, a Cash box, savings goals, and yearly spending stats.
+Idiot-proof paycheck budgeting with Paycheck 1/2, a Cash box, paycheck History, savings goals, and yearly spending stats.
 
 ## Local
 
