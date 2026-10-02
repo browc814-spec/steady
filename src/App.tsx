@@ -1372,7 +1372,19 @@ export default function App() {
     const link = consumeSetupFragment()
     if (link) void sync.connect(link.endpoint, link.token, link.device)
     sync.start()
-    return () => sync.stop()
+    // Setup link pasted into an already-open tab only changes the hash (no reload).
+    const onHash = () => {
+      const next = consumeSetupFragment()
+      if (next) {
+        setTab('settings')
+        void sync.connect(next.endpoint, next.token, next.device)
+      }
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => {
+      window.removeEventListener('hashchange', onHash)
+      sync.stop()
+    }
   }, [sync])
 
   // Multi-tab: another tab saved data or sync settings.

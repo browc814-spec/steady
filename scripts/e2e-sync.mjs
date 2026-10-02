@@ -278,6 +278,7 @@ async function main() {
 
   // ---------------- Device C: own data → confirm → merge
   const C = await newDevice(browser, { seed: seedC })
+  await C.page.goto(APP) // app already open; the setup link then only changes the hash
   await C.page.goto(setupLink('tablet'))
   await C.page.getByTestId('first-sync-dialog').waitFor({ timeout: 15000 })
   assert((await keys(C.page)).some((k) => k.startsWith('steady-budget-presync-')), 'C presync backup')
@@ -291,7 +292,8 @@ async function main() {
   assert(sA2.paychecks.p1.spending.some((x) => x.id === 'sp-c1'), 'C-only spend merged into A')
   assert(sA2.goals.some((g) => g.id === 'goal-c') && sA2.goals.some((g) => g.id === 'goal-car'), 'goals unioned')
   assert(sA2.paychecks.p1.paycheck === 2100, 'synced copy won on shared paycheck field')
-  ok('Device C (own data): confirmation dialog → merge by id; everyone converged')
+  assert(!C.page.url().includes('#'), 'C fragment stripped after hash-only navigation')
+  ok('Device C (own data, link pasted into open tab): confirmation dialog → merge by id; everyone converged')
 
   // ---------------- Agent Inbox row
   const catId = sA2.paychecks.p1.mutable[0].id
