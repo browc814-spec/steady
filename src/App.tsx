@@ -1,5 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Plus, Trash2, RotateCcw, Wallet, Banknote, Archive, ChevronDown, ChevronRight, History } from 'lucide-react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import {
+  Plus,
+  Trash2,
+  RotateCcw,
+  Wallet,
+  Banknote,
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  History,
+  Settings,
+} from 'lucide-react'
 import type {
   ArchivedPaycheck,
   BudgetState,
@@ -22,12 +33,19 @@ import {
   formatMoney,
   goalProgress,
   goalSaved,
-  loadState,
+  loadStateResult,
   money,
   saveState,
+  STORAGE_KEY,
 } from './math'
+import { SyncController } from './sync/controller'
+import { recomputeCash } from './sync/items'
+import { mergeStates } from './sync/backup'
+import { markPristine } from './sync/storage'
+import { consumeSetupFragment } from './sync/setupLink'
+import { FirstSyncDialog, LoadErrorBanner, SettingsView, SyncBadge } from './SettingsView'
 
-type MainTab = PaycheckKey | 'cash' | 'goals' | 'history' | 'stats'
+type MainTab = PaycheckKey | 'cash' | 'goals' | 'history' | 'stats' | 'settings'
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10)
@@ -44,12 +62,14 @@ function BudgetView({
   budget,
   onChange,
   onResetAll,
+  resetDisabled,
   onArchive,
 }: {
   paycheckKey: PaycheckKey
   budget: PaycheckBudget
-  onChange: (next: PaycheckBudget) => void
+  onChange: (update: (prev: PaycheckBudget) => PaycheckBudget) => void
   onResetAll: () => void
+  resetDisabled: boolean
   onArchive: (periodLabel: string) => void
 }) {
   const math = useMemo(() => computeBudget(budget), [budget])
@@ -67,18 +87,22 @@ function BudgetView({
     }
   }, [budget.mutable, logCategoryId])
 
-  const patch = (partial: Partial<PaycheckBudget>) => onChange({ ...budget, ...partial })
+  // Always derive from the latest state (functional update) so synced changes are never clobbered.
+  const patch = (
+    partial: Partial<PaycheckBudget> | ((prev: PaycheckBudget) => Partial<PaycheckBudget>),
+  ) =>
+    onChange((prev) => ({ ...prev, ...(typeof partial === 'function' ? partial(prev) : partial) }))
 
   const addImmutable = () => {
-    patch({
-      immutable: [...budget.immutable, { id: createId(), name: 'New bill', amount: 0 }],
-    })
+    patch((b) => ({
+      immutable: [...b.immutable, { id: createId(), name: 'New bill', amount: 0 }],
+    }))
   }
 
   const addMutable = () => {
-    patch({
-      mutable: [...budget.mutable, { id: createId(), name: 'New category', percent: 0 }],
-    })
+    patch((b) => ({
+      mutable: [...b.mutable, { id: createId(), name: 'New category', percent: 0 }],
+    }))
   }
 
   const addSpend = () => {
@@ -93,7 +117,7 @@ function BudgetView({
       merchant,
       note: logNote.trim(),
     }
-    patch({ spending: [entry, ...budget.spending] })
+    patch((b) => ({ spending: [entry, ...b.spending] }))
     setLogAmount('')
     setLogMerchant('')
     setLogNote('')
@@ -160,8 +184,15 @@ function BudgetView({
           <button
             type="button"
             className="btn btn-ghost"
+            disabled={resetDisabled}
+            title={resetDisabled ? 'Turn off sync in Settings to reset to the demo' : undefined}
             onClick={() => {
-              if (confirm('Reset everything (both paychecks, goals, cash) to the demo?')) {
+              if (resetDisabled) return
+              if (
+                confirm(
+                  'Reset everything (both paychecks, goals, cash, history) to the demo? This erases your data on this device.',
+                )
+              ) {
                 onResetAll()
               }
             }}
@@ -216,11 +247,11 @@ function BudgetView({
                 className="input"
                 value={item.name}
                 onChange={(e) =>
-                  patch({
-                    immutable: budget.immutable.map((x) =>
+                  patch((b) => ({
+                    immutable: b.immutable.map((x) =>
                       x.id === item.id ? { ...x, name: e.target.value } : x,
                     ),
-                  })
+                  }))
                 }
                 aria-label="Bill name"
               />
@@ -229,13 +260,13 @@ function BudgetView({
                 inputMode="decimal"
                 value={item.amount}
                 onChange={(e) =>
-                  patch({
-                    immutable: budget.immutable.map((x) =>
+                  patch((b) => ({
+                    immutable: b.immutable.map((x) =>
                       x.id === item.id
                         ? { ...x, amount: parseMoneyInput(e.target.value) }
                         : x,
                     ),
-                  })
+                  }))
                 }
                 aria-label={`${item.name} amount`}
               />
@@ -244,9 +275,9 @@ function BudgetView({
                 className="btn btn-danger"
                 aria-label={`Delete ${item.name}`}
                 onClick={() =>
-                  patch({
-                    immutable: budget.immutable.filter((x) => x.id !== item.id),
-                  })
+                  patch((b) => ({
+                    immutable: b.immutable.filter((x) => x.id !== item.id),
+                  }))
                 }
               >
                 <Trash2 size={16} />
@@ -309,11 +340,11 @@ function BudgetView({
                 className="input"
                 value={cat.name}
                 onChange={(e) =>
-                  patch({
-                    mutable: budget.mutable.map((x) =>
+                  patch((b) => ({
+                    mutable: b.mutable.map((x) =>
                       x.id === cat.id ? { ...x, name: e.target.value } : x,
                     ),
-                  })
+                  }))
                 }
                 aria-label="Category name"
               />
@@ -322,13 +353,13 @@ function BudgetView({
                 inputMode="decimal"
                 value={cat.percent}
                 onChange={(e) =>
-                  patch({
-                    mutable: budget.mutable.map((x) =>
+                  patch((b) => ({
+                    mutable: b.mutable.map((x) =>
                       x.id === cat.id
                         ? { ...x, percent: parseMoneyInput(e.target.value) }
                         : x,
                     ),
-                  })
+                  }))
                 }
                 aria-label={`${cat.name} percent`}
               />
@@ -341,10 +372,10 @@ function BudgetView({
                   className="btn btn-danger"
                   aria-label={`Delete ${cat.name}`}
                   onClick={() =>
-                    patch({
-                      mutable: budget.mutable.filter((x) => x.id !== cat.id),
-                      spending: budget.spending.filter((s) => s.categoryId !== cat.id),
-                    })
+                    patch((b) => ({
+                      mutable: b.mutable.filter((x) => x.id !== cat.id),
+                      spending: b.spending.filter((s) => s.categoryId !== cat.id),
+                    }))
                   }
                 >
                   <Trash2 size={16} />
@@ -497,9 +528,9 @@ function BudgetView({
                   className="btn btn-danger"
                   aria-label="Delete purchase"
                   onClick={() =>
-                    patch({
-                      spending: budget.spending.filter((s) => s.id !== entry.id),
-                    })
+                    patch((b) => ({
+                      spending: b.spending.filter((s) => s.id !== entry.id),
+                    }))
                   }
                 >
                   <Trash2 size={16} />
@@ -779,7 +810,7 @@ function CashBoxView({
   onChange,
 }: {
   state: BudgetState
-  onChange: (cashBox: BudgetState['cashBox']) => void
+  onChange: (update: (prev: BudgetState['cashBox']) => BudgetState['cashBox']) => void
 }) {
   const [mode, setMode] = useState<CashTxType>('add')
   const [amount, setAmount] = useState('')
@@ -789,9 +820,8 @@ function CashBoxView({
     const value = parseMoneyInput(amount)
     if (value <= 0 && mode !== 'set') return
     if (mode === 'set' && amount.trim() === '') return
-    onChange(
-      applyCashTransaction(state.cashBox, mode, value, note, todayISO()),
-    )
+    const date = todayISO()
+    onChange((cashBox) => applyCashTransaction(cashBox, mode, value, note, date))
     setAmount('')
     setNote('')
   }
@@ -911,9 +941,9 @@ function CashBoxView({
                   className="btn btn-danger"
                   aria-label="Delete cash update"
                   onClick={() => {
-                    const history = state.cashBox.history.filter((h) => h.id !== tx.id)
-                    const balance = history[0]?.balanceAfter ?? 0
-                    onChange({ balance, history })
+                    onChange((cashBox) =>
+                      recomputeCash(cashBox.history.filter((h) => h.id !== tx.id)),
+                    )
                   }}
                 >
                   <Trash2 size={16} />
@@ -932,7 +962,7 @@ function GoalsView({
   updateGoals,
 }: {
   state: BudgetState
-  updateGoals: (goals: SavingsGoal[]) => void
+  updateGoals: (update: (prev: SavingsGoal[]) => SavingsGoal[]) => void
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(state.goals[0]?.id ?? null)
   const [depositAmount, setDepositAmount] = useState('')
@@ -957,29 +987,27 @@ function GoalsView({
       target: 100,
       deposits: [],
     }
-    updateGoals([...state.goals, goal])
+    updateGoals((goals) => [...goals, goal])
     setSelectedId(goal.id)
   }
 
-  const patchGoal = (id: string, patch: Partial<SavingsGoal>) => {
-    updateGoals(state.goals.map((g) => (g.id === id ? { ...g, ...patch } : g)))
+  const patchGoal = (
+    id: string,
+    patch: Partial<SavingsGoal> | ((prev: SavingsGoal) => Partial<SavingsGoal>),
+  ) => {
+    updateGoals((goals) =>
+      goals.map((g) =>
+        g.id === id ? { ...g, ...(typeof patch === 'function' ? patch(g) : patch) } : g,
+      ),
+    )
   }
 
   const addDeposit = () => {
     if (!selected) return
     const amount = parseMoneyInput(depositAmount)
     if (amount <= 0) return
-    patchGoal(selected.id, {
-      deposits: [
-        {
-          id: createId(),
-          date: todayISO(),
-          amount,
-          note: depositNote.trim(),
-        },
-        ...selected.deposits,
-      ],
-    })
+    const deposit = { id: createId(), date: todayISO(), amount, note: depositNote.trim() }
+    patchGoal(selected.id, (g) => ({ deposits: [deposit, ...g.deposits] }))
     setDepositAmount('')
     setDepositNote('')
   }
@@ -1129,7 +1157,7 @@ function GoalsView({
                       className="btn btn-danger"
                       onClick={() => {
                         if (confirm(`Delete goal “${selected.name}”?`)) {
-                          updateGoals(state.goals.filter((g) => g.id !== selected.id))
+                          updateGoals((goals) => goals.filter((g) => g.id !== selected.id))
                         }
                       }}
                     >
@@ -1157,9 +1185,9 @@ function GoalsView({
                           className="btn btn-danger"
                           aria-label="Remove deposit"
                           onClick={() =>
-                            patchGoal(selected.id, {
-                              deposits: selected.deposits.filter((x) => x.id !== d.id),
-                            })
+                            patchGoal(selected.id, (g) => ({
+                              deposits: g.deposits.filter((x) => x.id !== d.id),
+                            }))
                           }
                         >
                           <Trash2 size={16} />
@@ -1304,18 +1332,76 @@ function StatsView({ state }: { state: BudgetState }) {
 }
 
 export default function App() {
-  const [state, setState] = useState<BudgetState>(() => loadState())
-  const [tab, setTab] = useState<MainTab>('p1')
+  const [boot] = useState(() => {
+    const result = loadStateResult()
+    if (result.status === 'empty') markPristine(result.state)
+    return result
+  })
+  const [state, setState] = useState<BudgetState>(boot.state)
+  const [tab, setTab] = useState<MainTab>(() =>
+    window.location.hash.includes('sync-url=') ? 'settings' : 'p1',
+  )
+  const [blocked, setBlocked] = useState(boot.status === 'corrupt')
+  const [sync] = useState(
+    () =>
+      new SyncController({
+        applyState: (updater) =>
+          new Promise<void>((resolve) => {
+            setState((prev) => {
+              const next = updater(prev)
+              resolve()
+              return next
+            })
+          }),
+      }),
+  )
+  const syncSnap = useSyncExternalStore(sync.subscribe, sync.getSnapshot)
+
+  // Single save path: persist locally, then let the sync layer diff it into items.
+  useEffect(() => {
+    if (blocked) return
+    saveState(state)
+    sync.absorb(state)
+  }, [state, blocked, sync])
 
   useEffect(() => {
-    saveState(state)
-  }, [state])
+    sync.setBlocked(blocked)
+  }, [blocked, sync])
 
-  const setPaycheck = (key: PaycheckKey, next: PaycheckBudget) => {
+  useEffect(() => {
+    const link = consumeSetupFragment()
+    if (link) void sync.connect(link.endpoint, link.token, link.device)
+    sync.start()
+    return () => sync.stop()
+  }, [sync])
+
+  // Multi-tab: another tab saved data or sync settings.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.storageArea && e.storageArea !== localStorage) return
+      const relevant = e.key === null || e.key === STORAGE_KEY || e.key.startsWith('steady-sync-')
+      if (!relevant || blocked) return
+      sync.reloadFromStorage()
+      if (e.key === null || e.key === STORAGE_KEY) {
+        const result = loadStateResult()
+        if (result.status === 'ok') setState(result.state)
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [sync, blocked])
+
+  const setPaycheck = (key: PaycheckKey, update: (prev: PaycheckBudget) => PaycheckBudget) => {
     setState((s) => ({
       ...s,
-      paychecks: { ...s.paychecks, [key]: next },
+      paychecks: { ...s.paychecks, [key]: update(s.paychecks[key]) },
     }))
+  }
+
+  const resetDemo = () => {
+    const fresh = createDefaultState()
+    markPristine(fresh)
+    setState(fresh)
   }
 
   return (
@@ -1328,7 +1414,32 @@ export default function App() {
             and a yearly spending scoreboard.
           </p>
         </div>
+        <SyncBadge snap={syncSnap} onClick={() => setTab('settings')} />
       </header>
+
+      {blocked ? (
+        <LoadErrorBanner
+          error={boot.error ?? 'Saved data could not be read.'}
+          backupKey={boot.backupKey}
+          onStartFresh={() => {
+            if (
+              confirm(
+                'Start fresh? The unreadable data stays in its backup key, but the app will begin saving again.',
+              )
+            ) {
+              setBlocked(false)
+            }
+          }}
+          onRestore={(restored) => {
+            setState(restored)
+            setBlocked(false)
+          }}
+        />
+      ) : null}
+
+      {syncSnap.status === 'confirm' && syncSnap.confirm ? (
+        <FirstSyncDialog snap={syncSnap} sync={sync} state={state} />
+      ) : null}
 
       <nav className="main-tabs" aria-label="Main">
         <button
@@ -1375,14 +1486,23 @@ export default function App() {
         >
           Statistics
         </button>
+        <button
+          type="button"
+          className={`main-tab ${tab === 'settings' ? 'active' : ''}`}
+          onClick={() => setTab('settings')}
+        >
+          <Settings size={16} style={{ marginRight: 4 }} />
+          Settings
+        </button>
       </nav>
 
       {tab === 'p1' || tab === 'p2' ? (
         <BudgetView
           paycheckKey={tab}
           budget={state.paychecks[tab]}
-          onChange={(next) => setPaycheck(tab, next)}
-          onResetAll={() => setState(createDefaultState())}
+          onChange={(update) => setPaycheck(tab, update)}
+          onResetAll={resetDemo}
+          resetDisabled={syncSnap.configured}
           onArchive={(periodLabel) => {
             setState((s) => archivePaycheckPeriod(s, tab, periodLabel))
             setTab('history')
@@ -1391,12 +1511,12 @@ export default function App() {
       ) : tab === 'cash' ? (
         <CashBoxView
           state={state}
-          onChange={(cashBox) => setState((s) => ({ ...s, cashBox }))}
+          onChange={(update) => setState((s) => ({ ...s, cashBox: update(s.cashBox) }))}
         />
       ) : tab === 'goals' ? (
         <GoalsView
           state={state}
-          updateGoals={(goals) => setState((s) => ({ ...s, goals }))}
+          updateGoals={(update) => setState((s) => ({ ...s, goals: update(s.goals) }))}
         />
       ) : tab === 'history' ? (
         <HistoryView
@@ -1408,11 +1528,23 @@ export default function App() {
             }))
           }
         />
+      ) : tab === 'settings' ? (
+        <SettingsView
+          state={state}
+          sync={sync}
+          snap={syncSnap}
+          onReplace={(next) => setState(next)}
+          onMerge={(incoming) => setState((s) => mergeStates(s, incoming))}
+        />
       ) : (
         <StatsView state={state} />
       )}
 
-      <p className="footer-note">Saved automatically in this browser. No account needed.</p>
+      <p className="footer-note">
+        {syncSnap.configured
+          ? 'Saved in this browser and synced to your private Google Sheet.'
+          : 'Saved automatically in this browser. Turn on sync in Settings to share with other devices.'}
+      </p>
     </div>
   )
 }

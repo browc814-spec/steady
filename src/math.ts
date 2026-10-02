@@ -283,7 +283,7 @@ function migrateArchived(raw: unknown): ArchivedPaycheck[] {
   return out
 }
 
-function migrateState(raw: Record<string, unknown>): BudgetState {
+export function migrateState(raw: Record<string, unknown>): BudgetState {
   const base = createDefaultState()
 
   // Dual-paycheck shape (v4+)
@@ -330,24 +330,67 @@ function migrateState(raw: Record<string, unknown>): BudgetState {
   }
 }
 
-export function loadState(): BudgetState {
+export type LoadStatus = 'ok' | 'empty' | 'corrupt'
+
+export interface LoadResult {
+  state: BudgetState
+  status: LoadStatus
+  /** localStorage key holding the unreadable raw text (status === 'corrupt') */
+  backupKey?: string
+  error?: string
+}
+
+const LEGACY_KEYS = [STORAGE_KEY, 'steady-budget-v4', 'steady-budget-v3', 'steady-budget-v2', 'steady-budget-v1']
+export const CORRUPT_PREFIX = 'steady-budget-corrupt-'
+
+/**
+ * Load saved data. If the saved text cannot be parsed, the raw string is copied to a
+ * backup key and status 'corrupt' is returned so the caller can refuse to overwrite it.
+ */
+export function loadStateResult(): LoadResult {
+  let raw: string | null = null
+  let sourceKey = STORAGE_KEY
   try {
-    const raw =
-      localStorage.getItem(STORAGE_KEY) ??
-      localStorage.getItem('steady-budget-v4') ??
-      localStorage.getItem('steady-budget-v3') ??
-      localStorage.getItem('steady-budget-v2') ??
-      localStorage.getItem('steady-budget-v1')
-    if (!raw) return createDefaultState()
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    return migrateState(parsed)
-  } catch {
-    return createDefaultState()
+    for (const key of LEGACY_KEYS) {
+      raw = localStorage.getItem(key)
+      if (raw !== null) {
+        sourceKey = key
+        break
+      }
+    }
+  } catch (e) {
+    return { state: createDefaultState(), status: 'corrupt', error: `Storage unavailable: ${String(e)}` }
+  }
+  if (raw === null) return { state: createDefaultState(), status: 'empty' }
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
+    return { state: migrateState(parsed as Record<string, unknown>), status: 'ok' }
+  } catch (e) {
+    const backupKey = `${CORRUPT_PREFIX}${new Date().toISOString().replace(/[:.]/g, '-')}`
+    try {
+      localStorage.setItem(backupKey, raw)
+    } catch {
+      /* the original key still holds the raw text; it is never overwritten while blocked */
+    }
+    return {
+      state: createDefaultState(),
+      status: 'corrupt',
+      backupKey,
+      error: `Saved data in "${sourceKey}" could not be read (${e instanceof Error ? e.message : String(e)}).`,
+    }
   }
 }
 
+export function loadState(): BudgetState {
+  return loadStateResult().state
+}
+
+/** Writes only when the serialized value changed (avoids storage-event ping-pong between tabs). */
 export function saveState(state: BudgetState) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  const json = JSON.stringify(state)
+  if (localStorage.getItem(STORAGE_KEY) === json) return
+  localStorage.setItem(STORAGE_KEY, json)
 }
 
 export function goalSaved(goal: { deposits: { amount: number }[] }) {

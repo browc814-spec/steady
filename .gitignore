@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Sync secrets (never commit)
+secrets/
+*.env
+sync/test/.data/
+test-results/
