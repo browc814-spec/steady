@@ -13,13 +13,13 @@ await page.screenshot({ path: path.join(outDir, 'steady_home.png'), fullPage: tr
 
 // Log a grocery spend
 await page.getByPlaceholder('0.00').fill('54.20')
-await page.getByPlaceholder('e.g. Costco run').fill('Costco run')
+await page.getByPlaceholder('e.g. DoorDash, Smoke City, Costco').fill('Costco run')
 await page.getByRole('button', { name: /Log it/i }).click()
 await page.waitForTimeout(400)
 await page.screenshot({ path: path.join(outDir, 'steady_after_log.png'), fullPage: true })
 
 // Change percent and confirm dollar updates visible
-const groceryPercent = page.locator('.mutable-row').filter({ hasText: 'Groceries' }).locator('input.money').first()
+const groceryPercent = page.getByLabel('Groceries percent')
 await groceryPercent.fill('35')
 await page.waitForTimeout(200)
 
