@@ -99,6 +99,11 @@ function processInbox() {
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureSheets_(ss);
+  // Plain-text columns so ISO times / ids typed or appended later are never parsed as dates.
+  var items = ss.getSheetByName('Items');
+  items.getRange(1, 1, items.getMaxRows(), ITEM_HEADERS.length + 3).setNumberFormat('@');
+  var inbox = ss.getSheetByName('Inbox');
+  inbox.getRange(1, 1, inbox.getMaxRows(), INBOX_HEADERS.length).setNumberFormat('@');
   var store = readStore_(ss);
   rebuildDerived_(ss, store);
 }

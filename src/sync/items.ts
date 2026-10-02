@@ -348,6 +348,19 @@ export function mergeItems(local: ItemMap, remote: SyncItem[]): MergeResult {
   return { items, tookRemote, localAhead }
 }
 
+/**
+ * First sync of a device that already has data into a non-empty store: the synced copy wins
+ * for every id this device has never edited since sync was set up (baseline items), even on
+ * exact timestamp ties; anything else merges with normal last-write-wins.
+ */
+export function mergeFirstSync(local: ItemMap, remote: SyncItem[]): MergeResult {
+  const filtered: ItemMap = { ...local }
+  for (const r of remote) {
+    if (filtered[r.id]?.updatedAt === BASELINE_TIME) delete filtered[r.id]
+  }
+  return mergeItems(filtered, remote)
+}
+
 function byCreated(a: SyncItem, b: SyncItem) {
   if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0

@@ -5,6 +5,7 @@ import {
   fromWire,
   liveCount,
   materialize,
+  mergeFirstSync,
   mergeItems,
   toWire,
   type ItemMap,
@@ -446,7 +447,7 @@ export class SyncController {
       await this.deps.applyState((prev) => {
         if (!this.meta) return prev
         this.absorb(prev)
-        const m = mergeItems(this.meta.items, pending.items)
+        const m = mergeFirstSync(this.meta.items, pending.items)
         this.meta = { ...this.meta, items: m.items, rev: pending.rev, dirty: m.localAhead, firstSyncDone: true }
         this.persistMeta()
         clearPristine()
